@@ -39,7 +39,10 @@ sealed class HeldStartup(WindowsConsoleService inner):IConsoleService
     public async Task<bool> Healthy(string version)
     {
         if(!await inner.Healthy(version))return false;
-        using var http=new HttpClient();using var response=await http.PostAsync("http://127.0.0.1:5080/api/agents/reports",new StringContent("{}",System.Text.Encoding.UTF8,"application/json"));
-        if(response.StatusCode!=System.Net.HttpStatusCode.ServiceUnavailable)throw new Exception("Candidate console accepted requests before update commit.");return true;
+        using var http=new HttpClient();
+        using var agentResponse=await http.PostAsync("http://127.0.0.1:5080/api/agents/reports",new StringContent("{}",System.Text.Encoding.UTF8,"application/json"));
+        if(agentResponse.StatusCode!=System.Net.HttpStatusCode.BadRequest)throw new Exception("Candidate console did not reject plaintext agent traffic.");
+        using var response=await http.PostAsync("http://127.0.0.1:5080/api/auth/setup",new StringContent("{}",System.Text.Encoding.UTF8,"application/json"));
+        if(response.StatusCode!=System.Net.HttpStatusCode.ServiceUnavailable)throw new Exception("Candidate console did not hold setup mutations before update commit.");return true;
     }
 }
