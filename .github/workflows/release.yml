@@ -8,7 +8,7 @@ permissions:
   contents: write
 concurrency:
   group: valert-release
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   windows:
     runs-on: windows-2022
@@ -27,7 +27,8 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore vALERT.sln
       - name: Test behavior and access isolation
-        run: dotnet test tests/Valert.Tests --configuration Release --no-restore --logger "trx;LogFileName=results.trx"
+        timeout-minutes: 5
+        run: dotnet test tests/Valert.Tests --configuration Release --no-restore --blame-hang-timeout 2m --logger "trx;LogFileName=results.trx"
       - name: Validate PowerShell syntax
         run: |
           Get-ChildItem -Recurse -Filter *.ps1 | Where-Object { $_.FullName -notmatch '\\(bin|obj|artifacts)\\' } | ForEach-Object {

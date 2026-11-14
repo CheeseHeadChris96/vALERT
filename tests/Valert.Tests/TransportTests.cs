@@ -97,14 +97,15 @@ public sealed class TransportTests
     [Fact]
     public async Task WindowsTrustedTlsRejectsWrongHostExpiredCertificatesAndDowngradeRedirects()
     {
-        // Windows CI only: an ephemeral test CA is removed in finally. Never change a developer's trust store.
+        // Disposable elevated Windows CI only; CurrentUser\Root can show an interactive trust dialog.
+        // The temporary machine-store CA is removed in finally. Never change a developer's trust store.
         if (!OperatingSystem.IsWindows() || Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true") return;
         using var caKey = RSA.Create(2048);
         var caRequest = new CertificateRequest("CN=vALERT CI TLS " + Guid.NewGuid(), caKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         caRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
         caRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign, true));
         using var ca = caRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-30), DateTimeOffset.UtcNow.AddDays(2));
-        using var roots = new X509Store(StoreName.Root, StoreLocation.CurrentUser); roots.Open(OpenFlags.ReadWrite);
+        using var roots = new X509Store(StoreName.Root, StoreLocation.LocalMachine); roots.Open(OpenFlags.ReadWrite);
         roots.Add(ca);
         try
         {
