@@ -205,7 +205,8 @@ public sealed class TransportTests(Xunit.Abstractions.ITestOutputHelper output)
                     if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)) length = int.Parse(line.Split(':')[1]);
                 }
                 if (header.Length == 0) return;
-                var body = new char[length]; await reader.ReadBlockAsync(body, timeout.Token);
+                var body = new char[length];
+                if (length > 0) await reader.ReadBlockAsync(body, timeout.Token);
                 HttpRequest = header + new string(body);
                 trace?.Invoke("TLS peer read request");
                 await tls.WriteAsync(Encoding.ASCII.GetBytes(response), timeout.Token);
