@@ -29,6 +29,9 @@ jobs:
       - name: Test behavior and access isolation
         timeout-minutes: 5
         run: dotnet test tests/Valert.Tests --configuration Release --no-restore --blame-hang-timeout 2m --logger "trx;LogFileName=results.trx"
+      - name: Print TLS validation diagnostics
+        if: always()
+        run: Get-ChildItem tests -Recurse -Filter transport.log | ForEach-Object { Get-Content $_.FullName }
       - name: Validate PowerShell syntax
         run: |
           Get-ChildItem -Recurse -Filter *.ps1 | Where-Object { $_.FullName -notmatch '\\(bin|obj|artifacts)\\' } | ForEach-Object {
@@ -61,6 +64,7 @@ jobs:
           name: windows-validation
           path: |
             tests/**/TestResults/*.trx
+            tests/**/tls-diagnostics/*.log
             artifacts/release/*
           if-no-files-found: ignore
       - name: Publish preview release

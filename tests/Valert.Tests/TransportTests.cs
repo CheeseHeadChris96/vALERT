@@ -12,8 +12,17 @@ using Xunit;
 
 namespace Valert.Tests;
 
-public sealed class TransportTests
+public sealed class TransportTests(Xunit.Abstractions.ITestOutputHelper output)
 {
+    void Trace(string message)
+    {
+        output.WriteLine(message);
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
+        {
+            var directory = Path.Combine(AppContext.BaseDirectory, "tls-diagnostics"); Directory.CreateDirectory(directory);
+            File.AppendAllText(Path.Combine(directory, "transport.log"), DateTimeOffset.UtcNow.ToString("O") + " " + message + Environment.NewLine);
+        }
+    }
     [Fact]
     public void CustomerPackageContainsHttpsOriginAndExecutableBootstrapResource()
     {
@@ -107,7 +116,9 @@ public sealed class TransportTests
         caRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign, true));
         using var ca = caRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-30), DateTimeOffset.UtcNow.AddDays(2));
         using var roots = new X509Store(StoreName.Root, StoreLocation.LocalMachine); roots.Open(OpenFlags.ReadWrite);
+        Trace("Adding temporary CI root");
         roots.Add(ca);
+        Trace("Temporary CI root added");
         try
         {
             using var key = RSA.Create(2048);
@@ -116,25 +127,29 @@ public sealed class TransportTests
             request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new("1.3.6.1.5.5.7.3.1") }, true));
             using var publicCert = request.Create(ca, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1), RandomNumberGenerator.GetBytes(16));
             using var certificate = publicCert.CopyWithPrivateKey(key);
-            await using (var peer = new TlsPeer(certificate))
+            await using (var peer = new TlsPeer(certificate, trace: Trace))
             {
-                using var client = ConsoleTransport.CreateClient(peer.Origin);
+                Trace("Trusted certificate request");
+                using var client = ConsoleTransport.CreateClient(peer.Origin, TimeSpan.FromSeconds(10));
                 client.DefaultRequestHeaders.Authorization = new("Bearer", "synthetic-tls-credential");
                 using var response = await client.PostAsync("api/agents/reports", new StringContent("synthetic report"));
                 response.EnsureSuccessStatusCode(); await peer.Completion;
                 Assert.True(peer.Encrypted); Assert.Equal(SslProtocols.Tls12, peer.Protocol);
                 Assert.Contains("Authorization: Bearer synthetic-tls-credential", peer.HttpRequest);
                 Assert.Contains("synthetic report", peer.HttpRequest);
+                Trace("Trusted encrypted request passed");
             }
             await using (var peer = new TlsPeer(certificate, "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/leak\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"))
             {
-                using var client = ConsoleTransport.CreateClient(peer.Origin);
+                Trace("Redirect rejection request");
+                using var client = ConsoleTransport.CreateClient(peer.Origin, TimeSpan.FromSeconds(10));
                 using var response = await client.GetAsync("api/agents/package/version");
                 Assert.Equal(HttpStatusCode.Found, response.StatusCode); await peer.Completion;
             }
             await using (var peer = new TlsPeer(certificate))
             {
-                using var client = ConsoleTransport.CreateClient(peer.Origin.Replace("localhost", "127.0.0.1"));
+                Trace("Wrong hostname request");
+                using var client = ConsoleTransport.CreateClient(peer.Origin.Replace("localhost", "127.0.0.1"), TimeSpan.FromSeconds(10));
                 var error = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync("api/agents/reports"));
                 Assert.IsAssignableFrom<AuthenticationException>(error.InnerException);
                 await peer.Completion; Assert.Null(peer.HttpRequest);
@@ -143,13 +158,14 @@ public sealed class TransportTests
             using var expired = expiredPublic.CopyWithPrivateKey(key);
             await using (var peer = new TlsPeer(expired))
             {
-                using var client = ConsoleTransport.CreateClient(peer.Origin);
+                Trace("Expired certificate request");
+                using var client = ConsoleTransport.CreateClient(peer.Origin, TimeSpan.FromSeconds(10));
                 var error = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync("api/agents/reports"));
                 Assert.IsAssignableFrom<AuthenticationException>(error.InnerException);
                 await peer.Completion; Assert.Null(peer.HttpRequest);
             }
         }
-        finally { roots.Remove(ca); }
+        finally { Trace("Removing temporary CI root"); roots.Remove(ca); Trace("Temporary CI root removed"); }
     }
 
     sealed class TlsPeer : IAsyncDisposable
@@ -161,22 +177,25 @@ public sealed class TransportTests
         public string? HttpRequest { get; private set; }
         public bool Encrypted { get; private set; }
         public SslProtocols Protocol { get; private set; }
-        public TlsPeer(X509Certificate2 certificate, string response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK")
+        public TlsPeer(X509Certificate2 certificate, string response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK", Action<string>? trace = null)
         {
             listener.Start(); Origin = "https://localhost:" + ((IPEndPoint)listener.LocalEndpoint).Port;
-            Completion = Serve(certificate, response);
+            Completion = Serve(certificate, response, trace);
         }
-        async Task Serve(X509Certificate2 certificate, string response)
+        async Task Serve(X509Certificate2 certificate, string response, Action<string>? trace)
         {
             try
             {
                 using var socket = await listener.AcceptTcpClientAsync(timeout.Token);
+                trace?.Invoke("TLS peer accepted TCP");
                 using var tls = new SslStream(socket.GetStream());
                 // Schannel requires a temporary key container, rather than an ephemeral RSA handle.
                 using var windowsCertificate = OperatingSystem.IsWindows()
                     ? X509CertificateLoader.LoadPkcs12(certificate.Export(X509ContentType.Pfx), null, X509KeyStorageFlags.DefaultKeySet)
                     : null;
+                trace?.Invoke("TLS peer loaded private key");
                 await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = windowsCertificate ?? certificate, EnabledSslProtocols = SslProtocols.Tls12 }, timeout.Token);
+                trace?.Invoke("TLS peer authenticated");
                 Encrypted = tls.IsEncrypted && tls.IsSigned; Protocol = tls.SslProtocol;
                 using var reader = new StreamReader(tls, Encoding.UTF8, leaveOpen: true);
                 var header = new StringBuilder(); var length = 0;
@@ -188,7 +207,9 @@ public sealed class TransportTests
                 if (header.Length == 0) return;
                 var body = new char[length]; await reader.ReadBlockAsync(body, timeout.Token);
                 HttpRequest = header + new string(body);
+                trace?.Invoke("TLS peer read request");
                 await tls.WriteAsync(Encoding.ASCII.GetBytes(response), timeout.Token);
+                trace?.Invoke("TLS peer wrote response");
             }
             catch (Exception e) when (e is AuthenticationException or IOException) { /* Expected for rejected certificates. */ }
         }
