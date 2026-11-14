@@ -1,0 +1,74 @@
+name: Build, test, and release Windows installers
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['docs/**', 'README.md', 'SECURITY.md', 'LICENSE']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: valert-release
+  cancel-in-progress: false
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Select release version
+        run: |
+          "VALERT_VERSION=0.1.0-preview.${{ github.run_number }}" >> $env:GITHUB_ENV
+      - name: Restore dependencies
+        run: dotnet restore vALERT.sln
+      - name: Test behavior and access isolation
+        run: dotnet test tests/Valert.Tests --configuration Release --no-restore --logger "trx;LogFileName=results.trx"
+      - name: Validate PowerShell syntax
+        run: |
+          Get-ChildItem -Recurse -Filter *.ps1 | Where-Object { $_.FullName -notmatch '\\(bin|obj|artifacts)\\' } | ForEach-Object {
+            $tokens=$null; $errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { $errors | Format-List; throw "PowerShell syntax error: $($_.FullName)" }
+          }
+      - name: Ensure installer compiler
+        run: |
+          if (-not (Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
+          }
+      - name: Build self-contained applications and installers
+        run: ./scripts/build-windows.ps1 -Version $env:VALERT_VERSION
+      - name: Install and start the Windows console
+        run: ./scripts/smoke-installer.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-validation
+          path: |
+            tests/**/TestResults/*.trx
+            artifacts/release/*
+          if-no-files-found: ignore
+      - name: Publish preview release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @"
+          First vALERT preview: Windows-hosted monitoring portal and collector.
+
+          Download **vALERT-Console-Setup.exe** for the central Windows Server. Create customers in the admin portal and use their generated enrollment packages to install agents.
+
+          Includes MFA, customer-scoped access, customer/job health charts, daily heat maps, schedule-aware overdue checks, repository thresholds, 90-day monitoring history, optional Veeam ONE, durable agent queues, automatic agent updates, and encrypted portal migration.
+
+          Validation: automated .NET tests, PowerShell syntax checks, and a real Windows installer/service smoke test. Live Veeam 12/13 integration and interruption testing on customer infrastructure remain required before production rollout. Read the compatibility notes and installation guide in the repository.
+
+          These installers are not Authenticode-signed. Update packages are verified using an enrollment-pinned portal signing key. No customer data, enrollment tokens, or credentials are included in this release.
+
+          Source commit: ${{ github.sha }}
+          "@
+          $notes | Set-Content "$env:RUNNER_TEMP/valert-release-notes.md" -Encoding utf8NoBOM
+          gh release create "v$env:VALERT_VERSION" ./artifacts/release/* --repo '${{ github.repository }}' --target '${{ github.sha }}' --title "vALERT $env:VALERT_VERSION" --notes-file "$env:RUNNER_TEMP/valert-release-notes.md" --prerelease
