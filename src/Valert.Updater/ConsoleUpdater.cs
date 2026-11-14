@@ -42,8 +42,23 @@ public sealed class WindowsConsoleService(ConsoleInstall install):IConsoleServic
     public string Command => Microsoft.Win32.Registry.GetValue(@"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\vALERT.Portal","ImagePath",null)?.ToString()??throw new InvalidOperationException("Console service is not installed.");
     public async Task Stop()
     {
+        // SERVICE_STOPPED can precede process exit. Wait for the original process so SQLite
+        // cannot retain open handles while the snapshot or rollback is being prepared.
+        var details=await CommandLine("sc.exe",["queryex","vALERT.Portal"],true);
+        var pidMatch=System.Text.RegularExpressions.Regex.Match(details,@"PID\s*:\s*(\d+)");
+        Process? tracked=null;
+        if(pidMatch.Success&&int.TryParse(pidMatch.Groups[1].Value,out var pid)&&pid>0)
+            try{tracked=Process.GetProcessById(pid);}catch(ArgumentException){}
+        using var process=tracked;
         await CommandLine("sc.exe",["stop","vALERT.Portal"],true);
-        for(var i=0;i<60;i++){var state=await CommandLine("sc.exe",["query","vALERT.Portal"]);if(state.Contains("STOPPED",StringComparison.Ordinal))return;await Task.Delay(1000);}
+        for(var i=0;i<60;i++){
+            var state=await CommandLine("sc.exe",["query","vALERT.Portal"]);
+            if(state.Contains("STOPPED",StringComparison.Ordinal)){
+                if(process is not null){using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(60));await process.WaitForExitAsync(timeout.Token);}
+                return;
+            }
+            await Task.Delay(1000);
+        }
         throw new InvalidOperationException("Console did not stop. Data was not replaced.");
     }
     public async Task SetCommand(string command)=>await CommandLine("sc.exe",["config","vALERT.Portal","binPath=",command]);
