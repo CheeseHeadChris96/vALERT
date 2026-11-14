@@ -71,7 +71,8 @@ public sealed class Platform(Store store)
                 var temp = Path.Combine(store.DataDirectory, "migration-" + Guid.NewGuid().ToString("N") + ".db");
                 try
                 {
-                    using (var source = store.Open()) using (var target = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=" + temp)) { target.Open(); source.BackupDatabase(target); }
+                    // A pooled SQLite handle keeps the snapshot locked on Windows after Dispose.
+                    using (var source = store.Open()) using (var target = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = temp, Pooling = false }.ToString())) { target.Open(); source.BackupDatabase(target); }
                     zip.CreateEntryFromFile(temp, "valert.db", CompressionLevel.Fastest);
                 }
                 finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); if (File.Exists(temp)) File.Delete(temp); }
