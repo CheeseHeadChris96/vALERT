@@ -30,7 +30,7 @@ if(args.Contains("--configure"))
     if(!string.IsNullOrWhiteSpace(enrollmentPath)&&File.Exists(enrollmentPath))
     {
         var enrollment=Wire.Decode<Enrollment>(File.ReadAllText(enrollmentPath)); if(enrollment.ExpiresAt<DateTimeOffset.UtcNow)throw new InvalidOperationException("Enrollment expired. Generate another package in the portal.");
-        using var portal=VeeamCollector.Client(enrollment.PortalUrl); using var response=await portal.PostAsJsonAsync("api/agents/enroll",new EnrollmentRequest(enrollment.Token,Environment.MachineName,Wire.Version),Wire.Json); response.EnsureSuccessStatusCode();
+        using var portal=ConsoleTransport.CreateClient(enrollment.PortalUrl); using var response=await portal.PostAsJsonAsync("api/agents/enroll",new EnrollmentRequest(enrollment.Token,Environment.MachineName,Wire.Version),Wire.Json); response.EnsureSuccessStatusCode();
         var registered=await response.Content.ReadFromJsonAsync<EnrollmentResponse>(Wire.Json)??throw new InvalidDataException("No enrollment response.");
         existing.PortalUrl=enrollment.PortalUrl;existing.AgentId=registered.AgentId;existing.CredentialProtected=AgentSettings.Protect(registered.Credential);existing.UpdatePublicKey=enrollment.UpdatePublicKey;
         var rootIndex=Array.IndexOf(args,"--install-root"); var installRoot=rootIndex>=0?args[rootIndex+1]:Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,"..",".."));
@@ -75,7 +75,7 @@ namespace Valert.Agent
                     else for(var i=0;i<batches.Count;i++)queue.Add(report with { ReportId=report.ReportId+"-"+i,Runs=batches[i].ToList() });
                     // Advance the collection cursor only after the full report is durably queued.
                     if(report.CollectionSucceeded) { settings.LastHistoryScan=report.CollectedAt;settings.OpenSessionIds=report.Runs.Where(r=>r.EndedAt is null).Select(r=>r.Id).ToList();Security.AtomicWrite(paths.SettingsPath,Wire.Encode(settings)); }
-                    using var portal=VeeamCollector.Client(settings.PortalUrl);portal.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",AgentSettings.Unprotect(settings.CredentialProtected));
+                    using var portal=ConsoleTransport.CreateClient(settings.PortalUrl);portal.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",AgentSettings.Unprotect(settings.CredentialProtected));
                     foreach(var file in queue.Files())
                     {
                         var queued=Wire.Decode<AgentReport>(await File.ReadAllTextAsync(file,stoppingToken));

@@ -10,7 +10,7 @@ if(!OperatingSystem.IsWindows())throw new PlatformNotSupportedException("The upd
 var rootIndex=Array.IndexOf(args,"--root");var root=rootIndex>=0?Path.GetFullPath(args[rootIndex+1]):Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,".."));
 if(args.Contains("--console")){await Valert.Updater.ConsoleUpdater.Run(root);return;}
 var trust=JsonDocument.Parse(File.ReadAllText(Path.Combine(root,"trust.json"))).RootElement;
-var data=trust.GetProperty("dataDirectory").GetString()!;var publicKey=trust.GetProperty("updatePublicKey").GetString()!;var portalUrl=new Uri(trust.GetProperty("portalUrl").GetString()!);
+var data=trust.GetProperty("dataDirectory").GetString()!;var publicKey=trust.GetProperty("updatePublicKey").GetString()!;var portalUrl=ConsoleTransport.Origin(trust.GetProperty("portalUrl").GetString()!);
 Directory.CreateDirectory(data);
 using var mutex=new Mutex(false,"Global\\vALERT.Agent.Updater");if(!mutex.WaitOne(0))return;
 var journalPath=Path.Combine(root,"update-journal.json");
@@ -44,7 +44,7 @@ try
     var encrypted=Convert.FromBase64String(settings.GetProperty("credentialProtected").GetString()!);
     var credential=System.Text.Encoding.UTF8.GetString(System.Security.Cryptography.ProtectedData.Unprotect(encrypted,null,DataProtectionScope.LocalMachine));
     var staging=Path.Combine(root,"staging");Directory.CreateDirectory(staging);var package=Path.Combine(staging,"agent.zip");
-    using(var client=new HttpClient(new HttpClientHandler { AllowAutoRedirect=false }){Timeout=TimeSpan.FromMinutes(10)})
+    using(var client=ConsoleTransport.CreateClient(portalUrl.AbsoluteUri,TimeSpan.FromMinutes(10)))
     {
         client.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",credential);
         using var response=await client.GetAsync(uri,HttpCompletionOption.ResponseHeadersRead);response.EnsureSuccessStatusCode();

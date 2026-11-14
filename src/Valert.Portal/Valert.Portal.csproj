@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <ItemGroup>
+    <EmbeddedResource Include="../../installer/Install-vALERT.ps1" LogicalName="Valert.Portal.Install-vALERT.ps1" />
     <Content Update="wwwroot/**/*" CopyToOutputDirectory="PreserveNewest" />
     <ProjectReference Include="../Valert.Core/Valert.Core.csproj" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.15" />

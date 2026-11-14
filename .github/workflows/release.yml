@@ -35,6 +35,11 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$errors) | Out-Null
             if ($errors.Count -gt 0) { $errors | Format-List; throw "PowerShell syntax error: $($_.FullName)" }
           }
+      - name: Verify bootstrap HTTPS guards on both PowerShell versions
+        run: |
+          ./scripts/test-bootstrap.ps1
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-bootstrap.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell bootstrap validation failed.' }
       - name: Ensure installer compiler
         run: |
           if (-not (Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) {
@@ -71,6 +76,8 @@ jobs:
           Adds admin-only console update controls: hourly GitHub detection, manual check/download/install, protected backups, and rollback on failed startup. Run this Windows installer once when upgrading from preview.4 or earlier to install the console updater task.
 
           SMTP configuration and an explicit test-email feature are available to administrators. SMTP starts disabled and unconfigured. Saving settings sends no email; backup alert emails remain disabled.
+
+          Agent traffic requires TLS 1.2/1.3 with certificate validation; plaintext agent endpoints and credential redirects are rejected. The enrollment bootstrap also enforces HTTPS and restricts installer redirect destinations. New console installations default to https://valert.rebootranch.net; existing saved addresses are preserved. Configure its certificate and DNS before enrolling agents.
 
           Validation: automated .NET tests, PowerShell syntax checks, and a real Windows installer/service smoke test. Live Veeam 12/13 integration and interruption testing on customer infrastructure remain required before production rollout. Read the compatibility notes and installation guide in the repository.
 

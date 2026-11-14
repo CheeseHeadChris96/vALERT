@@ -1,8 +1,8 @@
 param([string]$PublicUrl,[string]$CertificateThumbprint,[int]$HttpsPort=443)
 $ErrorActionPreference='Stop'
 $data=Join-Path $env:ProgramData 'vALERT\Portal';$path=Join-Path $data 'portal-settings.json'
-if(-not $PublicUrl){$PublicUrl=Read-Host 'Public HTTPS address (example: https://valert.example.com)'}
-$uri=[uri]$PublicUrl;if($uri.Scheme-ne'https'-or$uri.AbsolutePath-ne'/'){throw 'Enter an HTTPS origin without a path.'}
+if(-not $PublicUrl){$PublicUrl=Read-Host 'Public HTTPS address [https://valert.rebootranch.net]';if(-not $PublicUrl){$PublicUrl='https://valert.rebootranch.net'}}
+$uri=[uri]$PublicUrl;if(-not $uri.IsAbsoluteUri-or$uri.Scheme-ne'https'-or$uri.UserInfo-or$uri.AbsolutePath-ne'/'-or$uri.Query-or$uri.Fragment){throw 'Enter an HTTPS origin without credentials, a path, query, or fragment.'}
 if(-not $CertificateThumbprint){Get-ChildItem Cert:\LocalMachine\My | Select-Object Subject,Thumbprint,NotAfter | Format-Table;$CertificateThumbprint=Read-Host 'TLS certificate thumbprint from LocalMachine\My'}
 $cert=Get-Item ('Cert:\LocalMachine\My\'+$CertificateThumbprint.Replace(' ',''));if(-not $cert.HasPrivateKey){throw 'Certificate has no private key.'}
 $key=[Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)

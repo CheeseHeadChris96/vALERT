@@ -20,16 +20,20 @@ The installer includes the .NET runtime. It installs `vALERT.Portal` as Local Se
 
 ```powershell
 & 'C:\Program Files\vALERT Console\tools\Configure-Portal.ps1' `
-  -PublicUrl 'https://valert.example.com' `
+  -PublicUrl 'https://valert.rebootranch.net' `
   -CertificateThumbprint 'YOUR_CERTIFICATE_THUMBPRINT'
 ```
 
 The helper grants Local Service read access to an RSA certificate's private key, configures the HTTPS listener, creates a Windows firewall rule, and restarts the service. For ECDSA or hardware-backed certificates, grant access through your certificate tooling and set `certificateThumbprint` in the settings file manually.
 
-6. Forward public TCP 443 to this server's static internal IP. Update public DNS to your current public IP. The HTTPS certificate must match the hostname.
+6. Point the public DNS A record for `valert.rebootranch.net` to your current public IPv4 address. Forward public TCP 443 to this server's static internal IP on port 443. Install a certificate trusted by the customer Windows servers with `valert.rebootranch.net` in its subject alternative names. Publish an AAAA record only if inbound IPv6 is configured too.
 7. Verify the public URL from outside your network. Do not expose port 5080 or disable certificate validation.
 8. Under Settings, verify the public HTTPS address. Under Update center, refresh releases and wait for the generic agent installer to be cached.
 9. Create a customer and download its enrollment package. Follow `AGENT-SETUP.md`.
+
+New installations default to `https://valert.rebootranch.net`. Upgrades preserve existing saved settings; run the command above to configure an existing installation. Setting a hostname does not create DNS records or install a certificate. Agent enrollment, reports, acknowledgements, and update downloads require TLS 1.2 or TLS 1.3 with certificate validation. Even the loopback HTTP listener rejects agent API traffic. The Windows PowerShell enrollment bootstrap uses TLS 1.2.
+
+From another network, run `curl.exe --fail --verbose https://valert.rebootranch.net/health` without `--insecure`. Confirm a valid certificate for this hostname and a `ready` response. This validates public DNS, forwarding, and HTTPS without transmitting credentials. A certificate or connection failure must be fixed before enrolling agents; no HTTP fallback exists.
 
 ## Accounts
 

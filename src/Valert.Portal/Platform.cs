@@ -30,7 +30,8 @@ public sealed class Platform(Store store)
     }
     public byte[] EnrollmentPackage(Customer customer)
     {
-        if (!Uri.TryCreate(Settings.PublicUrl, UriKind.Absolute, out var url) || url.Scheme != "https" || url.Host == "localhost") throw new ArgumentException("Configure your public HTTPS hostname in Settings before enrolling a customer.");
+        var url = ConsoleTransport.Origin(Settings.PublicUrl);
+        if (url.Host == "localhost") throw new ArgumentException("Configure your public HTTPS hostname in Settings before enrolling a customer.");
         var token = Security.Token(); var expiry = DateTimeOffset.UtcNow.AddHours(24);
         store.Exec("INSERT INTO enrollments VALUES(@p0,@p1,@p2)", Security.Hash(token), customer.Id, expiry.ToString("O"));
         var enrollment = new Enrollment(Settings.PublicUrl.TrimEnd('/'), token, customer.Name, PublicKey, expiry);
@@ -38,25 +39,9 @@ public sealed class Platform(Store store)
         {
             void Add(string name, string text) { using var writer = new StreamWriter(zip.CreateEntry(name).Open(), new UTF8Encoding(false)); writer.Write(text); }
             Add("enrollment.json", Wire.Encode(enrollment));
-            Add("Install-vALERT.ps1", """
-                # Run this customer-specific bootstrap from an elevated PowerShell window.
-                # Downloads the approved installer over HTTPS and checks its portal-supplied checksum.
-                $ErrorActionPreference = 'Stop'
-                $e = Get-Content (Join-Path $PSScriptRoot 'enrollment.json') -Raw | ConvertFrom-Json
-                if ([DateTimeOffset]::Parse($e.expiresAt) -lt [DateTimeOffset]::UtcNow) { throw 'Enrollment expired. Generate a new package in vALERT.' }
-                $root = $e.portalUrl.TrimEnd('/')
-                $request = @{token=$e.token} | ConvertTo-Json
-                $asset = Invoke-RestMethod -Method Post -Uri "$root/api/enrollment/installer" -ContentType 'application/json' -Body $request
-                $file = Join-Path $env:TEMP ('vALERT-Agent-' + [guid]::NewGuid().ToString('N') + '.exe')
-                Invoke-WebRequest -Uri $asset.url -OutFile $file -UseBasicParsing
-                if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $asset.sha256) { Remove-Item $file; throw 'Installer checksum mismatch.' }
-                # The enrollment endpoint is authenticated by the single-use token over verified TLS.
-                # Bootstrap never disables certificate validation and never contacts Veeam itself.
-                $process = Start-Process -FilePath $file -ArgumentList @('/ENROLLMENT="' + (Join-Path $PSScriptRoot 'enrollment.json') + '"') -Wait -PassThru
-                if ($process.ExitCode -ne 0) { throw "Installer returned $($process.ExitCode)." }
-                Remove-Item $file -Force
-                Write-Host 'Installation complete. Check the customer page for enrollment and collection status.'
-                """);
+            using var bootstrap = typeof(Platform).Assembly.GetManifestResourceStream("Valert.Portal.Install-vALERT.ps1") ?? throw new InvalidOperationException("Enrollment bootstrap is missing.");
+            using var reader = new StreamReader(bootstrap);
+            Add("Install-vALERT.ps1", reader.ReadToEnd());
             Add("README.txt", $"vALERT enrollment for {customer.Name}\r\nExpires: {expiry:O}\r\nExtract this ZIP, then run Install-vALERT.ps1 as Administrator.\r\nSetup requests a dedicated Veeam monitoring identity. Do not share this package.\r\nThe token can enroll one server only. Generate another package for additional servers.\r\n");
         }
         return output.ToArray();

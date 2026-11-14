@@ -4,7 +4,7 @@ namespace Valert.Portal;
 
 public sealed record PortalSettings
 {
-    public string PublicUrl { get; set; } = "https://localhost";
+    public string PublicUrl { get; set; } = "https://valert.rebootranch.net";
     public string CertificateThumbprint { get; set; } = "";
     public int HttpsPort { get; set; } = 443;
     public int LocalPort { get; set; } = 5080;

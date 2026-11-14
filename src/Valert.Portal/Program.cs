@@ -64,7 +64,7 @@ if (!builder.Environment.IsEnvironment("Testing"))
         {
             using var certificates = new X509Store(StoreName.My, StoreLocation.LocalMachine); certificates.Open(OpenFlags.ReadOnly);
             var certificate = certificates.Certificates.Find(X509FindType.FindByThumbprint, platform.Settings.CertificateThumbprint, true).OfType<X509Certificate2>().FirstOrDefault(c => c.HasPrivateKey) ?? throw new InvalidOperationException("Configured HTTPS certificate was not found or has no accessible private key.");
-            options.ListenAnyIP(platform.Settings.HttpsPort, listen => listen.UseHttps(certificate));
+            options.ListenAnyIP(platform.Settings.HttpsPort, listen => listen.UseHttps(certificate, https => https.SslProtocols = ConsoleTransport.Protocols));
         }
     });
 }
@@ -83,6 +83,9 @@ app.Use(async (context, next) =>
     context.Response.Headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
     if (context.Request.IsHttps) context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000";
     if (context.Request.Path.StartsWithSegments("/api")) context.Response.Headers.CacheControl = "no-store";
+    // Local HTTP is only for browser setup/recovery. Agent credentials and reports always require TLS.
+    if (!context.Request.IsHttps && (context.Request.Path.StartsWithSegments("/api/agents") || context.Request.Path.StartsWithSegments("/api/enrollment")))
+    { context.Response.StatusCode = 400; await context.Response.WriteAsJsonAsync(new { error = "Agent traffic requires HTTPS." }); return; }
     if (!context.Request.IsHttps && context.Connection.RemoteIpAddress is { } address && !IPAddress.IsLoopback(address)) { context.Response.StatusCode = 400; await context.Response.WriteAsJsonAsync(new { error = "HTTPS is required." }); return; }
     try { await next(); }
     catch (Exception e) when (e is ArgumentException or InvalidDataException or JsonException or FormatException)
@@ -246,7 +249,7 @@ admin.MapPost("/users/{id}/reset", (HttpContext c,string id,CodeRequest input) =
 });
 admin.MapPost("/agents/{id}/update", (HttpContext c,string id) => { var agent = store.Agent(id) ?? throw new ArgumentException("Unknown agent."); agent.UpdateRequested = true; store.Save(agent); store.Audit(Current(c).Email,"Agent update requested",agent.MachineName); return Results.Ok(); });
 admin.MapPost("/agents/{id}/revoke", (HttpContext c,string id) => { var agent = store.Agent(id) ?? throw new ArgumentException("Unknown agent."); agent.Revoked = true; store.Save(agent); store.Audit(Current(c).Email,"Agent revoked",agent.MachineName); return Results.Ok(); });
-admin.MapPut("/settings", (HttpContext c, SettingsRequest input) => { if (!Uri.TryCreate(input.PublicUrl,UriKind.Absolute,out var uri) || uri.Scheme != "https" || !string.IsNullOrEmpty(uri.UserInfo) || uri.AbsolutePath != "/") throw new ArgumentException("Enter an HTTPS origin, such as https://valert.example.com."); platform.Settings.PublicUrl = uri.GetLeftPart(UriPartial.Authority); platform.Settings.IncludePreviewUpdates = input.IncludePreviewUpdates; platform.Settings.AutomaticUpdateChecks = input.AutomaticUpdateChecks; platform.SaveSettings(); store.Audit(Current(c).Email,"Portal settings updated",platform.Settings.PublicUrl); return Results.Ok(); });
+admin.MapPut("/settings", (HttpContext c, SettingsRequest input) => { var uri = ConsoleTransport.Origin(input.PublicUrl); platform.Settings.PublicUrl = uri.GetLeftPart(UriPartial.Authority); platform.Settings.IncludePreviewUpdates = input.IncludePreviewUpdates; platform.Settings.AutomaticUpdateChecks = input.AutomaticUpdateChecks; platform.SaveSettings(); store.Audit(Current(c).Email,"Portal settings updated",platform.Settings.PublicUrl); return Results.Ok(); });
 admin.MapPost("/releases/refresh", async (Releases releases, CancellationToken token) => { await releases.Refresh(token); return Results.Ok(new { releases.Status }); });
 admin.MapPost("/console/download",async (HttpContext c,Releases releases,CancellationToken token)=>{await releases.DownloadConsole(token);store.Audit(Current(c).Email,"Console installer downloaded and verified",releases.Published?.Version??"");return Results.Ok();});
 admin.MapGet("/console/installer",(Releases releases)=>releases.ConsoleInstallerPath is { } path&&File.Exists(path)?Results.File(path,"application/octet-stream","vALERT-Console-Setup.exe",enableRangeProcessing:true):Results.NotFound());
