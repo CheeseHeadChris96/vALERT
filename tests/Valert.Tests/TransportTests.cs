@@ -89,7 +89,8 @@ public sealed class TransportTests
         await using var peer = new TlsPeer(certificate);
         using var client = ConsoleTransport.CreateClient(peer.Origin);
         client.DefaultRequestHeaders.Authorization = new("Bearer", "must-not-reach-server");
-        await Assert.ThrowsAsync<HttpRequestException>(() => client.PostAsync("api/agents/reports", new StringContent("private report")));
+        var error = await Assert.ThrowsAsync<HttpRequestException>(() => client.PostAsync("api/agents/reports", new StringContent("private report")));
+        Assert.IsAssignableFrom<AuthenticationException>(error.InnerException);
         await peer.Completion;
         Assert.Null(peer.HttpRequest);
     }
@@ -134,7 +135,8 @@ public sealed class TransportTests
             await using (var peer = new TlsPeer(certificate))
             {
                 using var client = ConsoleTransport.CreateClient(peer.Origin.Replace("localhost", "127.0.0.1"));
-                await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync("api/agents/reports"));
+                var error = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync("api/agents/reports"));
+                Assert.IsAssignableFrom<AuthenticationException>(error.InnerException);
                 await peer.Completion; Assert.Null(peer.HttpRequest);
             }
             using var expiredPublic = request.Create(ca, DateTimeOffset.UtcNow.AddDays(-3), DateTimeOffset.UtcNow.AddDays(-1), RandomNumberGenerator.GetBytes(16));
@@ -142,7 +144,8 @@ public sealed class TransportTests
             await using (var peer = new TlsPeer(expired))
             {
                 using var client = ConsoleTransport.CreateClient(peer.Origin);
-                await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync("api/agents/reports"));
+                var error = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync("api/agents/reports"));
+                Assert.IsAssignableFrom<AuthenticationException>(error.InnerException);
                 await peer.Completion; Assert.Null(peer.HttpRequest);
             }
         }
@@ -169,7 +172,11 @@ public sealed class TransportTests
             {
                 using var socket = await listener.AcceptTcpClientAsync(timeout.Token);
                 using var tls = new SslStream(socket.GetStream());
-                await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = certificate, EnabledSslProtocols = SslProtocols.Tls12 }, timeout.Token);
+                // Schannel requires a temporary key container, rather than an ephemeral RSA handle.
+                using var windowsCertificate = OperatingSystem.IsWindows()
+                    ? X509CertificateLoader.LoadPkcs12(certificate.Export(X509ContentType.Pfx), null, X509KeyStorageFlags.DefaultKeySet)
+                    : null;
+                await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = windowsCertificate ?? certificate, EnabledSslProtocols = SslProtocols.Tls12 }, timeout.Token);
                 Encrypted = tls.IsEncrypted && tls.IsSigned; Protocol = tls.SslProtocol;
                 using var reader = new StreamReader(tls, Encoding.UTF8, leaveOpen: true);
                 var header = new StringBuilder(); var length = 0;
