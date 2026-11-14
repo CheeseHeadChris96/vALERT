@@ -45,6 +45,8 @@ jobs:
         run: ./scripts/build-windows.ps1 -Version $env:VALERT_VERSION
       - name: Install and start the Windows console
         run: ./scripts/smoke-installer.ps1
+      - name: Verify agent installer and preserve queued data
+        run: ./scripts/smoke-agent.ps1
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -211,6 +211,11 @@ api.MapGet("/customers/{id}/jobs/{agentId}/{jobId}/history", (HttpContext c, str
     Access(c,id); if (store.Agent(agentId)?.CustomerId != id) throw new UnauthorizedAccessException();
     return store.Read<JobRun>("SELECT payload FROM runs WHERE agent_id=@p0 AND job_id=@p1 ORDER BY started DESC LIMIT 100 OFFSET @p2", agentId, jobId, Math.Max(0,offset ?? 0));
 });
+api.MapGet("/customers/{id}/jobs/{agentId}/{jobId}/vm-success", (HttpContext c, string id, string agentId, string jobId) =>
+{
+    Access(c,id); if (store.Agent(agentId)?.CustomerId != id) throw new UnauthorizedAccessException();
+    return store.VmLastSuccess(agentId,jobId);
+});
 var admin = app.MapGroup("/api/admin").RequireAuthorization("admin");
 admin.MapGet("/state", (Releases releases) => new { customers = store.Customers(), users = store.Users().Select(u => u.Safe()), agents = store.Agents().Select(a => a.Safe()), settings = platform.Settings, release = releases.Current?.Version, releaseStatus = releases.Status, audit = store.Read<AuditEntry>("SELECT payload FROM audit ORDER BY id DESC LIMIT 100") });
 admin.MapPost("/customers", (HttpContext c, CustomerRequest input) => { ValidateName(input.Name); var customer = new Customer { Name = input.Name.Trim(), Notes = input.Notes ?? "" }; store.Save(customer); store.Audit(Current(c).Email,"Customer created",customer.Name); return customer; });

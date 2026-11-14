@@ -89,7 +89,10 @@ namespace Valert.Agent
                             var updateUri=new Uri(update.Url);var portalUri=new Uri(settings.PortalUrl);
                             if(updateUri.Scheme!="https"||updateUri.Authority!=portalUri.Authority)throw new InvalidDataException("Update URL does not match enrolled portal.");
                             // A separately installed SYSTEM scheduled task validates the immutable trust file and applies this request.
-                            Security.AtomicWrite(Path.Combine(paths.Data,"pending-update.json"),Wire.Encode(new { manifest=update,force=acknowledgement.UpdateRequested }));
+                            var pendingPath=Path.Combine(paths.Data,"pending-update.json");
+                            // Later backlog acknowledgements must not erase an administrator's retry request.
+                            if(acknowledgement.UpdateRequested || !File.Exists(pendingPath))
+                                Security.AtomicWrite(pendingPath,Wire.Encode(new { manifest=update,force=acknowledgement.UpdateRequested }));
                             Security.AtomicWrite(updateFile,"Update queued: "+update.Version);
                         }
                     }

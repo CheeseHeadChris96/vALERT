@@ -70,6 +70,26 @@ public sealed class Store
     public void Save(StoredJob job) => Exec("INSERT INTO jobs VALUES(@p0,@p1,@p2,@p3) ON CONFLICT(agent_id,id) DO UPDATE SET payload=excluded.payload", job.AgentId, job.Info.Id, job.CustomerId, Wire.Encode(job));
     public AgentReport? Snapshot(string agentId) => Read<AgentReport>("SELECT payload FROM snapshots WHERE agent_id=@p0", agentId).FirstOrDefault();
     public JobRun? Run(string agentId, string runId) => Read<JobRun>("SELECT payload FROM runs WHERE agent_id=@p0 AND id=@p1", agentId, runId).FirstOrDefault();
+    public Dictionary<string,DateTimeOffset> VmLastSuccess(string agentId, string jobId)
+    {
+        lock (Gate)
+        {
+            using var db = Open(); using var command = Command(db, """
+                SELECT name,time FROM (
+                  SELECT json_extract(v.value,'$.name') AS name,
+                    COALESCE(json_extract(v.value,'$.endedAt'),r.ended) AS time,
+                    ROW_NUMBER() OVER(PARTITION BY json_extract(v.value,'$.name')
+                      ORDER BY julianday(COALESCE(json_extract(v.value,'$.endedAt'),r.ended)) DESC) AS rn
+                  FROM runs r, json_each(r.payload,'$.vms') v
+                  WHERE r.agent_id=@p0 AND r.job_id=@p1 AND r.ended IS NOT NULL
+                    AND lower(json_extract(v.value,'$.result')) IN ('success','succeeded')
+                ) WHERE rn=1
+                """, agentId, jobId);
+            using var rows = command.ExecuteReader(); var result = new Dictionary<string,DateTimeOffset>();
+            while (rows.Read()) result[rows.GetString(0)] = DateTimeOffset.Parse(rows.GetString(1));
+            return result;
+        }
+    }
     public List<JobView> JobViews(string customerId, DateTimeOffset now)
     {
         lock (Gate)
