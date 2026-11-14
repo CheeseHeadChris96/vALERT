@@ -4,5 +4,6 @@
     <ProjectReference Include="../Valert.Core/Valert.Core.csproj" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.15" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.15" />
+    <PackageReference Include="MailKit" Version="5.0.0" />
   </ItemGroup>
 </Project>

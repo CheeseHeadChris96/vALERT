@@ -24,6 +24,7 @@ CloseApplications=no
 SetupLogging=yes
 [Files]
 Source: "..\artifacts\portal\*"; DestDir: "{app}\portal"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\artifacts\updater\*"; DestDir: "{app}\updater"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "Install-Services.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "Remove-Services.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "Configure-Portal.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
@@ -42,6 +43,11 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var ResultCode: Integer;
 begin
+  if FileExists(ExpandConstant('{app}\console-update\journal.json')) then
+  begin
+    Result := 'A console update is awaiting recovery. Let the vALERT Console Updater task finish before running this installer.';
+    Exit;
+  end;
   Exec(ExpandConstant('{sys}\sc.exe'), 'stop vALERT.Portal', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(3000);
   Result := '';

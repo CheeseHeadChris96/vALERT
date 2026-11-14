@@ -47,6 +47,8 @@ jobs:
         run: ./scripts/smoke-installer.ps1
       - name: Verify agent installer and preserve queued data
         run: ./scripts/smoke-agent.ps1
+      - name: Verify console update and Windows rollback
+        run: ./scripts/smoke-console-update.ps1 -Version $env:VALERT_VERSION
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -60,11 +62,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $notes = @"
-          First vALERT preview: Windows-hosted monitoring portal and collector.
+          vALERT preview: Windows-hosted monitoring portal and collector.
 
           Download **vALERT-Console-Setup.exe** for the central Windows Server. Create customers in the admin portal and use their generated enrollment packages to install agents.
 
           Includes MFA, customer-scoped access, customer/job health charts, daily heat maps, schedule-aware overdue checks, repository thresholds, 90-day monitoring history, optional Veeam ONE, durable agent queues, automatic agent updates, and encrypted portal migration.
+
+          Adds admin-only console update controls: hourly GitHub detection, manual check/download/install, protected backups, and rollback on failed startup. Run this Windows installer once when upgrading from preview.4 or earlier to install the console updater task.
+
+          SMTP configuration and an explicit test-email feature are available to administrators. SMTP starts disabled and unconfigured. Saving settings sends no email; backup alert emails remain disabled.
 
           Validation: automated .NET tests, PowerShell syntax checks, and a real Windows installer/service smoke test. Live Veeam 12/13 integration and interruption testing on customer infrastructure remain required before production rollout. Read the compatibility notes and installation guide in the repository.
 

@@ -18,4 +18,15 @@ if($Component-eq'Agent'){
     $settings=New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -MultipleInstances IgnoreNew
     Register-ScheduledTask -TaskName 'vALERT Agent Updater' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 }
+if($Component-eq'Portal'){
+    # These administrator-owned files let the limited portal request an update without choosing an executable or URL.
+    $metadata=@{installRoot=$InstallRoot;dataDirectory=$data}|ConvertTo-Json
+    $metadata|Set-Content (Join-Path $InstallRoot 'tools\console-install.json') -Encoding UTF8
+    $metadata|Set-Content (Join-Path $InstallRoot 'portal\console-install.json') -Encoding UTF8
+    $action=New-ScheduledTaskAction -Execute (Join-Path $InstallRoot 'updater\Valert.Updater.exe') -Argument ('--console --root "'+$InstallRoot+'"')
+    $trigger=New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1)
+    $principal=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $settings=New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -MultipleInstances IgnoreNew
+    Register-ScheduledTask -TaskName 'vALERT Console Updater' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+}
 if($Component-eq'Portal'-or(Test-Path(Join-Path $data 'agent-settings.json'))){Start-Service $service}

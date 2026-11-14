@@ -32,8 +32,10 @@ The first collection attempts to import up to 90 days of history still retained 
 - Customer-bound, expiring, single-use enrollment packages. Locally protected Veeam credentials; no Veeam passwords are uploaded to the portal.
 - Durable agent queues with explicit acknowledgements and idempotent ingestion.
 - Automatic agent updates, update status, manual retry, protected updater trust, startup validation, interrupted-update recovery, and rollback without deleting monitoring queues.
+- Console updates: automatic hourly GitHub detection, manual checking and installer downloads, and admin-initiated installation with a protected data snapshot and startup rollback.
+- Admin-only SMTP settings with encrypted credentials, required TLS, and an explicit test-email action. SMTP starts disabled and unconfigured.
 - Encrypted migration export and a Windows restore tool preserving customer, account/MFA, and agent identities.
-- Dashboard-only operation; no email or other notifications are sent.
+- Backup alerts remain dashboard-only. Configuring SMTP does not enable notification rules or send email automatically.
 
 ## Hosting
 
@@ -74,5 +76,7 @@ GitHub Actions produces self-contained Windows x64 applications, installers, SHA
 ## Security and operating limits
 
 Read [security](SECURITY.md), [compatibility](docs/COMPATIBILITY.md), and [migration](docs/MIGRATION.md). This repository and its generic installers are public. Runtime databases, private keys, customer enrollment files, and credentials must remain private.
+
+When upgrading from preview.4 or earlier, run the new Windows console installer once to install its privileged update task. Future console releases can then be installed through the admin Update center. See [console updates and SMTP](docs/ADMIN-CONFIGURATION.md).
 
 Installers in this first preview are **not Authenticode-signed**. Automatic agent packages are separately verified using the portal's signing key pinned during enrollment. Obtaining and integrating an organizational Windows code-signing certificate remains a deployment task.

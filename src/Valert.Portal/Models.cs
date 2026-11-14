@@ -9,7 +9,22 @@ public sealed record PortalSettings
     public int HttpsPort { get; set; } = 443;
     public int LocalPort { get; set; } = 5080;
     public bool IncludePreviewUpdates { get; set; } = true;
+    public bool AutomaticUpdateChecks { get; set; } = true;
+    public SmtpSettings Smtp { get; set; } = new();
     public bool MigrationPaused { get; set; }
+    public object Safe() => new { PublicUrl, CertificateThumbprint, HttpsPort, LocalPort, IncludePreviewUpdates, AutomaticUpdateChecks, MigrationPaused, Smtp = Smtp.Safe() };
+}
+public sealed record SmtpSettings
+{
+    public bool Enabled { get; set; }
+    public string Host { get; set; } = "";
+    public int Port { get; set; } = 587;
+    public string Security { get; set; } = "StartTls";
+    public string Username { get; set; } = "";
+    public string PasswordProtected { get; set; } = "";
+    public string FromAddress { get; set; } = "";
+    public string FromName { get; set; } = "vALERT";
+    public object Safe() => new { Enabled, Host, Port, Security, Username, FromAddress, FromName, PasswordConfigured = PasswordProtected.Length > 0 };
 }
 public sealed record PortalUser
 {

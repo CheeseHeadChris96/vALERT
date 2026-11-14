@@ -8,6 +8,7 @@ using Valert.Core;
 if(args.Contains("--self-test")){Console.WriteLine("vALERT.Updater "+Wire.Version+" ready");return;}
 if(!OperatingSystem.IsWindows())throw new PlatformNotSupportedException("The updater runs on Windows.");
 var rootIndex=Array.IndexOf(args,"--root");var root=rootIndex>=0?Path.GetFullPath(args[rootIndex+1]):Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,".."));
+if(args.Contains("--console")){await Valert.Updater.ConsoleUpdater.Run(root);return;}
 var trust=JsonDocument.Parse(File.ReadAllText(Path.Combine(root,"trust.json"))).RootElement;
 var data=trust.GetProperty("dataDirectory").GetString()!;var publicKey=trust.GetProperty("updatePublicKey").GetString()!;var portalUrl=new Uri(trust.GetProperty("portalUrl").GetString()!);
 Directory.CreateDirectory(data);

@@ -30,6 +30,8 @@ if (args.Contains("--recover-admin"))
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args=args, ContentRootPath=Directory.Exists(Path.Combine(AppContext.BaseDirectory,"wwwroot"))?AppContext.BaseDirectory:null });
 builder.Services.AddWindowsService(options => options.ServiceName = "vALERT.Portal");
 builder.Services.AddSingleton(store); builder.Services.AddSingleton(platform);
+builder.Services.AddSingleton<ConsoleUpdates>();
+builder.Services.AddSingleton<IMailTransport,SmtpTransport>();builder.Services.AddSingleton<MailService>();
 builder.Services.AddSingleton<Releases>(); builder.Services.AddHostedService(sp => sp.GetRequiredService<Releases>());
 builder.Services.AddDataProtection().SetApplicationName("vALERT").PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(dataDirectory, "keys")));
 builder.Services.AddAntiforgery(o => { o.HeaderName = "X-CSRF-TOKEN"; o.Cookie.Name = "valert.csrf"; o.Cookie.SameSite = SameSiteMode.Strict; });
@@ -92,6 +94,7 @@ app.UseAuthentication(); app.UseAuthorization(); app.UseRateLimiter();
 app.Use(async (context, next) =>
 {
     var mutation = HttpMethods.IsPost(context.Request.Method) || HttpMethods.IsPut(context.Request.Method) || HttpMethods.IsDelete(context.Request.Method);
+    if(mutation&&ConsoleUpdates.Held){context.Response.StatusCode=503;await context.Response.WriteAsJsonAsync(new{error="Console update startup validation is in progress. Retry shortly."});return;}
     if (mutation)
     {
         if (!context.Request.Path.StartsWithSegments("/api/agents") && !context.Request.Path.StartsWithSegments("/api/enrollment"))
@@ -217,7 +220,7 @@ api.MapGet("/customers/{id}/jobs/{agentId}/{jobId}/vm-success", (HttpContext c, 
     return store.VmLastSuccess(agentId,jobId);
 });
 var admin = app.MapGroup("/api/admin").RequireAuthorization("admin");
-admin.MapGet("/state", (Releases releases) => new { customers = store.Customers(), users = store.Users().Select(u => u.Safe()), agents = store.Agents().Select(a => a.Safe()), settings = platform.Settings, release = releases.Current?.Version, releaseStatus = releases.Status, audit = store.Read<AuditEntry>("SELECT payload FROM audit ORDER BY id DESC LIMIT 100") });
+admin.MapGet("/state", (Releases releases,ConsoleUpdates updates) => new { customers = store.Customers(), users = store.Users().Select(u => u.Safe()), agents = store.Agents().Select(a => a.Safe()), settings = platform.Settings.Safe(), console = releases.ConsoleState(updates), release = releases.Current?.Version, releaseStatus = releases.Status, audit = store.Read<AuditEntry>("SELECT payload FROM audit ORDER BY id DESC LIMIT 100") });
 admin.MapPost("/customers", (HttpContext c, CustomerRequest input) => { ValidateName(input.Name); var customer = new Customer { Name = input.Name.Trim(), Notes = input.Notes ?? "" }; store.Save(customer); store.Audit(Current(c).Email,"Customer created",customer.Name); return customer; });
 admin.MapPut("/customers/{id}", (HttpContext c, string id, CustomerRequest input) => { var customer = store.Customer(id) ?? throw new ArgumentException("Unknown customer."); ValidateName(input.Name); customer.Name = input.Name.Trim(); customer.Notes = input.Notes ?? ""; customer.GraceMinutes = Math.Clamp(input.GraceMinutes,0,10080); store.Save(customer); store.Audit(Current(c).Email,"Customer updated",customer.Name); return customer; });
 admin.MapPost("/customers/{id}/archive", (HttpContext c, string id) =>
@@ -243,8 +246,19 @@ admin.MapPost("/users/{id}/reset", (HttpContext c,string id,CodeRequest input) =
 });
 admin.MapPost("/agents/{id}/update", (HttpContext c,string id) => { var agent = store.Agent(id) ?? throw new ArgumentException("Unknown agent."); agent.UpdateRequested = true; store.Save(agent); store.Audit(Current(c).Email,"Agent update requested",agent.MachineName); return Results.Ok(); });
 admin.MapPost("/agents/{id}/revoke", (HttpContext c,string id) => { var agent = store.Agent(id) ?? throw new ArgumentException("Unknown agent."); agent.Revoked = true; store.Save(agent); store.Audit(Current(c).Email,"Agent revoked",agent.MachineName); return Results.Ok(); });
-admin.MapPut("/settings", (HttpContext c, SettingsRequest input) => { if (!Uri.TryCreate(input.PublicUrl,UriKind.Absolute,out var uri) || uri.Scheme != "https" || !string.IsNullOrEmpty(uri.UserInfo) || uri.AbsolutePath != "/") throw new ArgumentException("Enter an HTTPS origin, such as https://valert.example.com."); platform.Settings.PublicUrl = uri.GetLeftPart(UriPartial.Authority); platform.Settings.IncludePreviewUpdates = input.IncludePreviewUpdates; platform.SaveSettings(); store.Audit(Current(c).Email,"Portal settings updated",platform.Settings.PublicUrl); return Results.Ok(); });
+admin.MapPut("/settings", (HttpContext c, SettingsRequest input) => { if (!Uri.TryCreate(input.PublicUrl,UriKind.Absolute,out var uri) || uri.Scheme != "https" || !string.IsNullOrEmpty(uri.UserInfo) || uri.AbsolutePath != "/") throw new ArgumentException("Enter an HTTPS origin, such as https://valert.example.com."); platform.Settings.PublicUrl = uri.GetLeftPart(UriPartial.Authority); platform.Settings.IncludePreviewUpdates = input.IncludePreviewUpdates; platform.Settings.AutomaticUpdateChecks = input.AutomaticUpdateChecks; platform.SaveSettings(); store.Audit(Current(c).Email,"Portal settings updated",platform.Settings.PublicUrl); return Results.Ok(); });
 admin.MapPost("/releases/refresh", async (Releases releases, CancellationToken token) => { await releases.Refresh(token); return Results.Ok(new { releases.Status }); });
+admin.MapPost("/console/download",async (HttpContext c,Releases releases,CancellationToken token)=>{await releases.DownloadConsole(token);store.Audit(Current(c).Email,"Console installer downloaded and verified",releases.Published?.Version??"");return Results.Ok();});
+admin.MapGet("/console/installer",(Releases releases)=>releases.ConsoleInstallerPath is { } path&&File.Exists(path)?Results.File(path,"application/octet-stream","vALERT-Console-Setup.exe",enableRangeProcessing:true):Results.NotFound());
+admin.MapPost("/console/install",(HttpContext c,ConsoleInstallRequest input,ConsoleUpdates updates,Releases releases)=>{
+    StepUp(c,input.Code);if(releases.Published?.Version!=input.Version)throw new ArgumentException("Release changed. Check for updates and select the current release.");
+    updates.Queue(input.Version);store.Audit(Current(c).Email,"Console update requested",input.Version);return Results.Accepted(value:new{message="Update queued. The console will restart; agents retain reports during the interruption."});
+});
+admin.MapPut("/smtp",(HttpContext c,SmtpRequest input,MailService mail)=>{mail.Configure(input);store.Audit(Current(c).Email,"SMTP configuration updated",input.Enabled?"Enabled":"Disabled");return Results.Ok();});
+admin.MapPost("/smtp/test",async(HttpContext c,SmtpTestRequest input,MailService mail,CancellationToken token)=>{
+    try{await mail.SendTest(input.Recipient,token);}catch(ArgumentException){throw;}catch(Exception e)when(e is not OperationCanceledException){store.Audit(Current(c).Email,"SMTP test failed",e.GetType().Name);return Results.BadRequest(new{error="SMTP delivery failed. Check the host, port, TLS mode, and credentials."});}
+    store.Audit(Current(c).Email,"SMTP test sent",input.Recipient);return Results.Ok(new{message="Test email accepted by the SMTP server."});
+});
 admin.MapPost("/migration/export", (HttpContext c,MigrationRequest input) => { StepUp(c,input.Code); if (input.Password.Length < 16) throw new ArgumentException("Use a migration passphrase of at least 16 characters."); store.Audit(Current(c).Email,"Migration freeze and export",Wire.Version); var data = platform.Export(input.Password); return Results.File(data,"application/octet-stream","vALERT-Migration-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".vab"); });
 admin.MapPost("/migration/resume", (HttpContext c) => { lock(store.Gate) { platform.Settings.MigrationPaused = false; platform.SaveSettings(); store.Audit(Current(c).Email,"Old portal resumed; do not run both copies",Wire.Version); } return Results.Ok(); });
 
@@ -290,5 +304,7 @@ record TokenRequest(string Token);
 record CustomerRequest(string Name,string? Notes,int GraceMinutes = 30);
 record GraceRequest(int? Minutes);
 record UserRequest(string Name,string Email,bool Admin,bool AllCustomers,List<string>? CustomerIds,bool Enabled = true);
-record SettingsRequest(string PublicUrl,bool IncludePreviewUpdates);
+record SettingsRequest(string PublicUrl,bool IncludePreviewUpdates,bool AutomaticUpdateChecks=true);
+record ConsoleInstallRequest(string Version,string Code);
+record SmtpTestRequest(string Recipient);
 record MigrationRequest(string Password,string Code);
