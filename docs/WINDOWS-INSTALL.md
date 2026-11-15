@@ -15,7 +15,7 @@ The installer includes the .NET runtime. It installs `vALERT.Portal` as Local Se
 1. Download `vALERT-Console-Setup.exe` from the GitHub Releases page and run it as administrator.
 2. On the server, open `http://localhost:5080`. This loopback-only listener is for local setup and recovery; it is not exposed through the firewall.
 3. Read `%ProgramData%\vALERT\Portal\initial-setup.txt` locally as administrator. Enter that one-time token, your name/email, and a password of at least 12 characters. Do not post the token to GitHub.
-4. Enroll an authenticator app with the displayed setup key. Save the one-use recovery codes privately.
+4. Scan the displayed QR code with your authenticator app, then enter its six-digit code to confirm enrollment. Each account gets a cryptographically random secret; the QR code is generated locally by the console. If scanning is unavailable, expand the manual setup-key option. Save the one-use recovery codes privately.
 5. Configure HTTPS in an elevated PowerShell window:
 
 ```powershell

@@ -138,7 +138,8 @@ object Pending(HttpContext context, PortalUser user)
     var ticket = Wire.Encode(new PendingLogin(user.Id, user.Stamp, DateTimeOffset.UtcNow.AddMinutes(10)));
     context.Response.Cookies.Append("valert.pending", pendingProtector.Protect(ticket), new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, Secure = context.Request.IsHttps, MaxAge = TimeSpan.FromMinutes(10), Path = "/api/auth" });
     var secret = user.MfaConfirmed ? null : protector.Unprotect(user.TotpProtected);
-    return new { stage = user.MfaConfirmed ? "mfa" : "enroll", secret, uri = secret is null ? null : $"otpauth://totp/vALERT:{Uri.EscapeDataString(user.Email)}?secret={secret}&issuer=vALERT&digits=6&period=30", email = user.Email };
+    var enrollment = secret is null ? null : MfaEnrollment.Create(user.Email, secret);
+    return new { stage = user.MfaConfirmed ? "mfa" : "enroll", secret, uri = enrollment?.Uri, qrCodeDataUrl = enrollment?.QrCodeDataUrl, email = user.Email };
 }
 app.MapGet("/health", () => Results.Ok(new { status = "ready", version = Wire.Version, migrationPaused = platform.Settings.MigrationPaused }));
 var auth = app.MapGroup("/api/auth").RequireRateLimiting("auth");

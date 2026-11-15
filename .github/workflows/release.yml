@@ -82,6 +82,8 @@ jobs:
 
           SMTP configuration and an explicit test-email feature are available to administrators. SMTP starts disabled and unconfigured. Saving settings sends no email; backup alert emails remain disabled.
 
+          MFA enrollment now displays a scannable QR code for each account's randomly generated authenticator secret. The console generates the QR image locally, supports manual entry, and requires a valid six-digit code to finish setup. Existing enrolled accounts keep their authenticator configuration.
+
           Agent traffic requires TLS 1.2/1.3 with certificate validation; plaintext agent endpoints and credential redirects are rejected. The enrollment bootstrap also enforces HTTPS and restricts installer redirect destinations. New console installations default to https://valert.rebootranch.net; existing saved addresses are preserved. Configure its certificate and DNS before enrolling agents.
 
           Validation: automated .NET tests, PowerShell syntax checks, and a real Windows installer/service smoke test. Live Veeam 12/13 integration and interruption testing on customer infrastructure remain required before production rollout. Read the compatibility notes and installation guide in the repository.
